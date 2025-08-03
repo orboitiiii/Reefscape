@@ -1,0 +1,145 @@
+plugins {
+    id "java-library"  // 替換為 java-library 以支持庫發布與 API 暴露
+    id "maven-publish" // 添加 maven-publish 以定義發布物
+    id "edu.wpi.first.GradleRIO" version "2025.3.2"
+}
+
+repositories {
+    mavenCentral()
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+    options.compilerArgs.add '-XDstringConcat=inline'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()  // 添加以生成 sources JAR，提高庫的可調試性
+}
+
+def ROBOT_MAIN_CLASS = "frc.robot.Main"
+
+// Define my targets (RoboRIO) and artifacts (deployable files)
+// This is added by GradleRIO's backing project DeployUtils.
+deploy {
+    targets {
+        roborio(getTargetTypeClass('RoboRIO')) {
+            // Team number is loaded either from the .wpilib/wpilib_preferences.json
+            // or from command line. If not found an exception will be thrown.
+            // You can use getTeamOrDefault(team) instead of getTeamNumber if you
+            // want to store a team number in this file.
+            team = project.frc.getTeamNumber()
+            debug = project.frc.getDebugOrDefault(false)
+
+            artifacts {
+                // First part is artifact name, 2nd is artifact type
+                // getTargetTypeClass is a shortcut to get the class type using a string
+
+                frcJava(getArtifactTypeClass('FRCJavaArtifact')) {
+                }
+
+                // Static files artifact
+                frcStaticFileDeploy(getArtifactTypeClass('FileTreeArtifact')) {
+                    files = project.fileTree('src/main/deploy')
+                    directory = '/home/lvuser/deploy'
+                    deleteOldFiles = false // Change to true to delete files on roboRIO that no
+                                           // longer exist in deploy directory of this project
+                }
+            }
+        }
+    }
+}
+
+def deployArtifact = deploy.targets.roborio.artifacts.frcJava
+
+// Set to true to use debug for JNI.
+wpi.java.debugJni = false
+
+// Set this to true to enable desktop support.
+def includeDesktopSupport = true
+
+// Defining my dependencies. In this case, WPILib (+ friends), and vendor libraries.
+// Also defines JUnit 5.
+dependencies {
+    annotationProcessor wpi.java.deps.wpilibAnnotations()
+    implementation       wpi.java.deps.wpilib()
+    implementation       wpi.java.vendor.java()
+
+    implementation 'org.ejml:ejml-core:0.44.0'
+    implementation 'org.ejml:ejml-ddense:0.44.0'
+    implementation 'org.ejml:ejml-simple:0.44.0'
+
+    implementation 'org.knowm.xchart:xchart:3.8.1'
+
+    implementation 'org.slf4j:slf4j-api:2.0.7'
+    implementation 'org.slf4j:slf4j-simple:2.0.7'
+
+    roborioDebug    wpi.java.deps.wpilibJniDebug(wpi.platforms.roborio)
+    roborioDebug    wpi.java.vendor.jniDebug(wpi.platforms.roborio)
+    roborioRelease  wpi.java.deps.wpilibJniRelease(wpi.platforms.roborio)
+    roborioRelease  wpi.java.vendor.jniRelease(wpi.platforms.roborio)
+    nativeDebug     wpi.java.deps.wpilibJniDebug(wpi.platforms.desktop)
+    nativeDebug     wpi.java.vendor.jniDebug(wpi.platforms.desktop)
+    simulationDebug wpi.sim.enableDebug()
+    nativeRelease   wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
+    nativeRelease   wpi.java.vendor.jniRelease(wpi.platforms.desktop)
+    simulationRelease wpi.sim.enableRelease()
+
+    /* JUnit 5 */
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly   'org.junit.platform:junit-platform-launcher'
+
+    testRuntimeOnly wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (it.requested.group == 'org.ejml') it.useVersion '0.44.0'
+    }
+}
+
+test {
+    useJUnitPlatform()
+    systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+}
+
+// Simulation configuration (e.g. environment variables).
+wpi.sim.addGui().defaultEnabled = true
+wpi.sim.addDriverstation()
+
+// Setting up my Jar File. In this case, adding all libraries into the main jar ('fat jar')
+// in order to make them all available at runtime. Also adding the manifest so WPILib
+// knows where to look for our Robot Class.
+jar {
+    // 註釋掉 fat JAR 打包，因為庫不應包含運行時依賴；如果需要 fat JAR 僅用於 FRC 部署，可條件式啟用
+    // from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    from sourceSets.main.allSource
+    manifest edu.wpi.first.gradlerio.GradleRIOPlugin.javaManifest(ROBOT_MAIN_CLASS)
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+// Configure jar and deploy tasks
+deployArtifact.jarTask = jar
+wpi.java.configureExecutableTasks(jar)
+wpi.java.configureTestTasks(test)
+
+// Configure string concat to always inline compile
+tasks.withType(JavaCompile) {
+    options.compilerArgs.add '-XDstringConcat=inline'
+}
+
+// 添加 publishing 塊以定義 Maven 發布物；JitPack 將依賴此生成 artifact
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java  // 發布標準 Java 庫組件（JAR、sources 等）
+            // 可選：自訂 groupId、artifactId、version，如果未定義，JitPack 將使用默認（基於 GitHub 倉庫）
+            // groupId = 'com.example'
+            // artifactId = 'my-library'
+            // version = '1.0.0'
+        }
+    }
+}

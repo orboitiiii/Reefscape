@@ -1,0 +1,9 @@
+build/ 
+.gradle/ 
+*.class 
+.vscode/ 
+*.log 
+*.tmp 
+ctre_sim/ 
+*.dll 
+*.pdb 
